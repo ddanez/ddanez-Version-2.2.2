@@ -1,7 +1,8 @@
 /**
  * Servicio para consultar y actualizar la tasa oficial del Banco Central de Venezuela (BCV)
- * Soporta tanto el entorno nativo móvil (APK Capacitor) como el entorno Web.
  */
+
+import { dbService } from '../db';
 
 export interface BcvRateResult {
   success: boolean;
@@ -40,14 +41,16 @@ export async function fetchBcvRate(): Promise<BcvRateResult> {
 
   // 2. Intentar a través del backend local /api/exchange-rate/bcv
   try {
+    const baseUrl = dbService.getBaseUrl();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch('/api/exchange-rate/bcv', {
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${baseUrl}/api/exchange-rate/bcv`, {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
 
-    if (res.ok) {
+    const contentType = res.headers.get("content-type") || "";
+    if (res.ok && contentType.includes("application/json")) {
       const data = await res.json();
       if (data.success && data.rate > 0) {
         return {

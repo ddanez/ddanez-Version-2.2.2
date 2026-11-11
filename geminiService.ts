@@ -1,3 +1,4 @@
+import { dbService } from './db';
 
 export const analyzeFinancialData = async (data: any) => {
   const token = localStorage.getItem('auth_token');
@@ -41,25 +42,39 @@ export const analyzeFinancialData = async (data: any) => {
 
   try {
     console.log("🤖 Solicitando análisis al servidor...");
-    const response = await fetch('/api/ai/analyze', {
+    const baseUrl = dbService.getBaseUrl();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(`${baseUrl}/api/ai/analyze`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ prompt, data })
+      body: JSON.stringify({ prompt, data }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
+    const contentType = response.headers.get("content-type") || "";
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Error en la respuesta del servidor');
+      if (contentType.includes("application/json")) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error en la respuesta del servidor');
+      }
+      throw new Error('El servidor de Inteligencia Artificial no está disponible en este momento.');
     }
 
-    const result = await response.json();
-    console.log("✅ Análisis completado exitosamente.");
-    return result.text;
+    if (contentType.includes("application/json")) {
+      const result = await response.json();
+      console.log("✅ Análisis completado exitosamente.");
+      return result.text;
+    } else {
+      throw new Error('Servidor fuera de línea o sin respuesta JSON.');
+    }
   } catch (error: any) {
     console.error("❌ Error al analizar datos con el servidor:", error);
-    return `Lo siento, no pude realizar el análisis en este momento. ${error.message || 'Por favor, intenta más tarde.'}`;
+    return `Lo siento, la función de análisis financiero con IA requiere conexión activa con el servidor. ${error.message || 'Por favor, intenta más tarde.'}`;
   }
 };

@@ -358,17 +358,22 @@ const Settings: React.FC<Props> = ({ company, setCompany, settings, setSettings,
         setCompany(newCompany);
         await dbService.put('settings', { ...newCompany, id: 'company_info' });
 
-        // Enviar al servidor para regenerar los iconos nativos de Android y PWA con el logo original
+        // Enviar al servidor para regenerar los iconos nativos de Android y PWA si está en línea
         try {
+          const baseUrl = dbService.getBaseUrl();
           const token = localStorage.getItem('auth_token');
-          await fetch('/api/settings/upload-logo', {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          await fetch(`${baseUrl}/api/settings/upload-logo`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': token ? `Bearer ${token}` : ''
             },
-            body: JSON.stringify({ imageBase64: base64 })
+            body: JSON.stringify({ imageBase64: base64 }),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
         } catch (serverErr) {
           console.warn("No se pudo sincronizar logo con el servidor nativo:", serverErr);
         }

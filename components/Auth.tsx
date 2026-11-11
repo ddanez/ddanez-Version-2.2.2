@@ -55,19 +55,27 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     let isMounted = true;
     const checkInit = async () => {
       try {
+        const baseUrl = dbService.getBaseUrl();
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch('/api/auth/setup-status', { signal: controller.signal });
+        const res = await fetch(`${baseUrl}/api/auth/setup-status`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        if (res.ok) {
+        const cType = res.headers.get("content-type") || "";
+        if (res.ok && cType.includes("application/json")) {
           const data = await res.json();
           if (isMounted && data.requiresSetup) {
             setIsSetupMode(true);
             return;
           }
+        } else {
+          // Servidor offline o respuesta HTML de Capacitor: verificar si existen usuarios locales
+          const saved = localStorage.getItem('local_users');
+          if (!saved || JSON.parse(saved).length === 0) {
+            if (isMounted) setIsSetupMode(true);
+          }
         }
       } catch (e) {
-        // En modo offline, verificar si hay usuarios guardados en este dispositivo
+        // En error de red o timeout, verificar si existen usuarios locales
         const saved = localStorage.getItem('local_users');
         if (!saved || JSON.parse(saved).length === 0) {
           if (isMounted) setIsSetupMode(true);
@@ -285,36 +293,65 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     setIsLoading(true);
 
     try {
-      // 1. Intentar registrar en el servidor
+      const baseUrl = dbService.getBaseUrl();
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-      const response = await fetch('/api/auth/setup-initial-admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: setupData.name.trim(),
-          username: setupData.username.trim().toLowerCase(),
-          password: setupData.password
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
 
       let token = 'local-offline-token';
-      let userObj: UserType;
+      let userObj: UserType | null = null;
 
-      if (response.ok) {
-        const data = await response.json();
-        token = data.token;
-        userObj = data.user;
-      } else {
-        // Si el servidor ya tenía admin o rechazó
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.message || 'Error al configurar en el servidor');
+      try {
+        const response = await fetch(`${baseUrl}/api/auth/setup-initial-admin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: setupData.name.trim(),
+            username: setupData.username.trim().toLowerCase(),
+            password: setupData.password
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          const data = await response.json();
+          token = data.token;
+          userObj = data.user;
+        } else if (!response.ok && contentType.includes("application/json")) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.message || 'Error al configurar en el servidor');
+        } else {
+          // Servidor no disponible o respuesta estática de Capacitor (HTML)
+          throw new Error("SERVER_OFFLINE");
+        }
+      } catch (reqErr: any) {
+        // Si el servidor dio un error específico en JSON (ej. ya existe admin), detenerse y mostrar
+        if (reqErr.message !== "SERVER_OFFLINE" && 
+            !reqErr.message.includes("fetch") && 
+            !reqErr.message.includes("<!DOCTYPE") && 
+            !reqErr.message.includes("JSON") &&
+            reqErr.name !== "AbortError") {
+          setError(reqErr.message);
+          setIsLoading(false);
+          return;
+        }
       }
 
-      // Guardar perfil offline seguro con hash y salt
+      // Si el servidor está apagado o en modo APK autónomo, inicializar localmente de inmediato
+      if (!userObj) {
+        const allPerms = Object.values(AppTab);
+        userObj = {
+          id: window.crypto.randomUUID(),
+          name: setupData.name.trim(),
+          username: setupData.username.trim().toLowerCase(),
+          role: 'admin',
+          permissions: allPerms,
+          token: 'local-offline-token'
+        };
+      }
+
+      // Guardar perfil offline seguro con hash y salt (sin almacenar contraseña en texto plano)
       const salt = window.crypto.randomUUID();
       const passwordHash = await hashPasswordWithSalt(setupData.password, salt);
       const localUser = {
@@ -329,31 +366,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       dbService.setToken(token);
       onLogin(userObj);
     } catch (err: any) {
-      // Si el servidor no está disponible (modo APK autónomo sin servidor Termux encendido)
-      if (err.name === 'AbortError' || (err.message && err.message.includes('fetch'))) {
-        const salt = window.crypto.randomUUID();
-        const passwordHash = await hashPasswordWithSalt(setupData.password, salt);
-        const allPerms = Object.values(AppTab);
-        const localAdmin: UserType & { salt: string; passwordHash: string } = {
-          id: window.crypto.randomUUID(),
-          name: setupData.name.trim(),
-          username: setupData.username.trim().toLowerCase(),
-          role: 'admin',
-          permissions: allPerms,
-          token: 'local-offline-token',
-          salt,
-          passwordHash
-        };
-
-        const { salt: s, passwordHash: ph, ...safeAdmin } = localAdmin;
-        localStorage.setItem('local_users', JSON.stringify([localAdmin]));
-        localStorage.setItem('auth_token', 'local-offline-token');
-        localStorage.setItem('user_data', JSON.stringify(safeAdmin));
-        dbService.setToken('local-offline-token');
-        onLogin(safeAdmin);
-      } else {
-        setError(err.message || 'Error al crear la cuenta de administrador');
-      }
+      console.warn("Error en setup:", err);
+      setError("No se pudo completar el registro. Intente de nuevo.");
     } finally {
       setIsLoading(false);
     }
@@ -364,7 +378,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     setIsLoading(true);
     setError('');
 
-    const endpoint = '/api/auth/login';
+    const baseUrl = dbService.getBaseUrl();
+    const endpoint = `${baseUrl}/api/auth/login`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2500);
 
@@ -379,8 +394,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       });
       clearTimeout(timeoutId);
 
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
         const data = await response.json();
 
         // Si el servidor respondió con error de credenciales (401, 403, 429), MOSTRAR ERROR DIRECTO Y NO HACER FALLBACK LOCAL
