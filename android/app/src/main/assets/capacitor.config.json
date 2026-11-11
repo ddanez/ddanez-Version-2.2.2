@@ -1,0 +1,9 @@
+{
+	"appId": "com.ddanez.gestorpro",
+	"appName": "D'Danez Gestor Pro",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https",
+		"cleartext": true
+	}
+}

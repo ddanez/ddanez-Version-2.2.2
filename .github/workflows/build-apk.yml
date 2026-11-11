@@ -1,0 +1,70 @@
+name: Compilar APK Android
+
+on:
+  push:
+    branches: [ '**' ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Generar APK de D'Danez Gestor Pro
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configurar Java JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Instalar dependencias del proyecto
+        run: |
+          npm install
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+
+      - name: Compilar Frontend web
+        run: npm run build
+
+      - name: Inicializar y Sincronizar Android
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Generar iconos y recursos con logo D'Danez
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          if ! command -v convert &> /dev/null; then
+            echo "Instalando ImageMagick como respaldo..."
+            sudo apt-get update -y --fix-missing || true
+            sudo apt-get install -y imagemagick || true
+          fi
+          node scripts/generate-icons.js || true
+
+      - name: Dar permisos a Gradlew
+        run: |
+          cd android
+          chmod +x gradlew
+
+      - name: Compilar archivo APK con Gradle
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Publicar APK para descarga
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: DDanez-GestorPro-APK
+          path: android/app/build/outputs/apk/debug/*.apk

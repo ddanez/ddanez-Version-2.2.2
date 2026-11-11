@@ -1,0 +1,371 @@
+# INFORME DE AUDITORÍA TÉCNICA Y PLAN DE CORRECCIÓN
+## Proyecto: Version 2.1
+
+**Destinatario:** Google AI Studio  
+**Objetivo:** Corregir vulnerabilidades de seguridad, problemas de autenticación, autorización y sincronización de datos, sin alterar el diseño visual ni eliminar funcionalidades existentes.
+
+---
+
+## 1. CONTEXTO Y OBJETIVO
+
+Se realizó una revisión estática preliminar del repositorio:
+
+https://github.com/ddanez/Version-2.1
+
+La revisión identificó problemas potencialmente críticos en la gestión de credenciales, autenticación, permisos, configuración y sincronización entre el servidor y el almacenamiento local.
+
+Se solicita a Google AI Studio que realice una revisión integral del código fuente y aplique las correcciones necesarias.
+
+**Condición fundamental:** No reconstruir el proyecto desde cero, no cambiar innecesariamente su arquitectura, no rediseñar las interfaces y no eliminar funcionalidades existentes. Las correcciones deben integrarse sobre la implementación actual.
+
+Antes de modificar archivos, analiza las dependencias y relaciones entre componentes para evitar regresiones.
+
+---
+
+## 2. VULNERABILIDADES DE SEGURIDAD PRIORITARIAS
+
+### 2.1. Exposición de claves API en el frontend
+
+**Archivo relacionado:** `vite.config.ts`
+
+Se detectó que las variables `GEMINI_API_KEY` y `API_KEY` pueden trasladarse a variables `VITE_*` y quedar incorporadas en el JavaScript enviado al navegador.
+
+**Correcciones solicitadas:**
+
+- Eliminar cualquier clave privada del bundle del frontend.
+- No exponer secretos mediante `process.env`, `define` ni variables `VITE_*`.
+- Trasladar las llamadas a Gemini y otros proveedores de IA al backend.
+- Implementar endpoints seguros para las solicitudes de IA.
+- Mantener las claves API exclusivamente en variables de entorno del servidor.
+- Revisar también los archivos de configuración y compilación para detectar otras credenciales expuestas.
+
+Las claves que hayan podido quedar expuestas deben considerarse comprometidas y regenerarse.
+
+### 2.2. Secreto JWT predeterminado
+
+**Archivo relacionado:** `server.ts`
+
+Se identificó el uso de un valor predeterminado:
+
+`super-secret-key`
+
+**Correcciones solicitadas:**
+
+- Eliminar los secretos predeterminados.
+- Exigir `JWT_SECRET` mediante variables de entorno.
+- Si falta el secreto en producción, impedir el arranque del servidor y mostrar un mensaje claro.
+- Utilizar un secreto criptográficamente seguro.
+- Revisar la vigencia de los tokens. Actualmente se observó una duración de 90 días.
+- Implementar una estrategia segura de renovación y revocación de sesiones.
+
+### 2.3. Credenciales administrativas predeterminadas
+
+**Archivos relacionados:** `server.ts` y `components/Auth.tsx`
+
+Se encontraron referencias a las credenciales:
+
+- Usuario: `admin`
+- Contraseña: `admin123`
+
+**Correcciones solicitadas:**
+
+- Eliminar las credenciales universales del código fuente.
+- No crear automáticamente administradores con contraseñas conocidas.
+- Implementar un proceso de instalación inicial seguro.
+- Solicitar la creación de la primera cuenta administradora mediante un procedimiento controlado.
+- Exigir una contraseña segura.
+- Evitar que el frontend incorpore cuentas administrativas de respaldo.
+
+### 2.4. Registro público con posibilidad de asignar privilegios
+
+**Archivo relacionado:** `server.ts`
+
+La ruta `/api/auth/register` debe revisarse porque se observó que recibe información de rol y permisos desde el cuerpo de la solicitud.
+
+**Correcciones solicitadas:**
+
+- Un usuario no debe poder asignarse el rol de administrador.
+- No aceptar roles ni permisos privilegiados directamente desde una solicitud pública.
+- El registro público, si se mantiene, debe crear exclusivamente usuarios con el rol básico autorizado.
+- La creación y modificación de administradores debe requerir una sesión administrativa válida.
+- Implementar validaciones tanto en el backend como en la base de datos.
+
+### 2.5. Autorización insuficiente en endpoints
+
+**Archivos relacionados:** `server.ts` y `App.tsx`
+
+La interfaz filtra algunas opciones según el rol, pero esto no sustituye la autorización del servidor.
+
+**Correcciones solicitadas:**
+
+Implementar controles de acceso reales en todos los endpoints.
+
+Revisar especialmente:
+
+- `/api/sales`
+- `/api/products`
+- `/api/customers`
+- `/api/settings`
+- `/api/expenses`
+- `/api/purchases`
+- `/api/users`
+- `/api/bootstrap`
+
+Cada operación debe comprobar los permisos del usuario autenticado.
+
+Un usuario con rol de vendedor no debe poder consultar, modificar o eliminar información administrativa mediante peticiones HTTP directas.
+
+Implementar una política centralizada de autorización basada en roles y permisos, aplicada en el backend.
+
+### 2.6. Protección de configuraciones y claves de IA
+
+**Archivos relacionados:** `server.ts`, `db.ts` y componentes de configuración.
+
+Se detectó que las configuraciones pueden contener claves de proveedores de IA y que existen rutas de acceso a configuraciones generales.
+
+**Correcciones solicitadas:**
+
+- Separar los secretos de las configuraciones públicas.
+- Nunca devolver claves API al frontend.
+- Proteger la lectura y modificación de configuraciones administrativas.
+- No incluir secretos en `/api/bootstrap`.
+- Evitar que usuarios sin privilegios puedan consultar o modificar las configuraciones de proveedores.
+- Implementar almacenamiento seguro de credenciales en el servidor.
+
+---
+
+## 3. AUTENTICACIÓN Y FUNCIONAMIENTO OFFLINE
+
+**Archivo relacionado:** `components/Auth.tsx`
+
+Se detectaron riesgos en la autenticación local.
+
+### 3.1. Contraseñas almacenadas en localStorage
+
+Se observó que los usuarios locales pueden conservar contraseñas en texto plano dentro de `localStorage.local_users`.
+
+**Correcciones solicitadas:**
+
+- Eliminar el almacenamiento de contraseñas en texto plano.
+- No guardar contraseñas recuperables en el navegador.
+- Utilizar mecanismos de autenticación seguros.
+- Si se requiere autenticación offline, diseñar un mecanismo específico que no almacene contraseñas originales.
+
+### 3.2. Fallback inseguro ante errores de autenticación
+
+Actualmente, el flujo puede recurrir a la autenticación local cuando una solicitud de login falla.
+
+Esto puede permitir el acceso local incluso después de que el servidor haya rechazado las credenciales.
+
+**Correcciones solicitadas:**
+
+Distinguir claramente entre:
+
+- Error de conexión.
+- Servidor no disponible.
+- Credenciales incorrectas (401).
+- Acceso denegado (403).
+- Cuenta deshabilitada o revocada.
+
+El acceso offline solamente debe habilitarse ante una indisponibilidad de red previamente identificada, nunca como respuesta automática a credenciales incorrectas o permisos denegados.
+
+### 3.3. Autenticación biométrica
+
+**Archivo relacionado:** `biometricHelper.ts`
+
+Revisar la autenticación biométrica para garantizar que:
+
+- La biometría no sustituya la autorización del servidor.
+- No permita entrar con cuentas administrativas predeterminadas.
+- Los permisos se mantengan vinculados a una identidad válida.
+- Se gestione adecuadamente la revocación de sesiones y usuarios.
+- El token local `local-offline-token` no se acepte como una credencial válida para operaciones remotas.
+
+**Importante:** Mantener la funcionalidad offline y biométrica, pero implementarla de forma segura.
+
+---
+
+## 4. SINCRONIZACIÓN Y CONSISTENCIA DE DATOS
+
+**Archivo relacionado:** `db.ts`
+
+El proyecto utiliza almacenamiento local y sincronización con el servidor. Esta funcionalidad debe preservarse y reforzarse.
+
+Se identificaron posibles problemas relacionados con operaciones asíncronas, eliminación de registros y conflictos entre dispositivos.
+
+### Correcciones solicitadas
+
+1. Implementar una cola persistente de operaciones pendientes de sincronización.
+2. Registrar qué operaciones fueron enviadas y cuáles fueron confirmadas por el servidor.
+3. Reintentar automáticamente las operaciones fallidas.
+4. Evitar duplicaciones cuando se repite una operación.
+5. Implementar identificadores únicos e idempotencia.
+6. Gestionar correctamente los conflictos entre varios dispositivos.
+7. Garantizar que las eliminaciones también se sincronicen.
+8. Evitar que datos eliminados en el servidor reaparezcan en el almacenamiento local.
+9. Revisar el comportamiento de importación y restauración de backups.
+10. Garantizar que las operaciones críticas no se consideren completadas antes de recibir confirmación.
+
+### Requisitos adicionales
+
+- La aplicación debe seguir funcionando sin conexión.
+- Los datos pendientes deben conservarse al cerrar la aplicación.
+- Al recuperar internet, debe producirse una sincronización automática.
+- Debe existir una estrategia para detectar conflictos y evitar pérdidas de información.
+- Las operaciones financieras y comerciales deben tener especial protección contra duplicaciones y modificaciones inconsistentes.
+
+No eliminar ni simplificar la funcionalidad offline existente.
+
+---
+
+## 5. CONFIGURACIÓN DEL SERVIDOR
+
+**Archivo relacionado:** `server.ts`
+
+Aplicar las siguientes mejoras:
+
+- Restringir CORS a los dominios autorizados.
+- Incorporar limitación de intentos de inicio de sesión (rate limiting).
+- Reducir el límite de solicitudes JSON de 50 MB a un tamaño apropiado para cada endpoint.
+- Validar y sanitizar los datos recibidos.
+- Evitar devolver errores internos, trazas o detalles sensibles de proveedores.
+- Revisar las rutas administrativas.
+- Aplicar autorización a todas las operaciones de lectura, escritura y eliminación.
+- Revisar la gestión de sesiones y tokens.
+- Incorporar registros de auditoría para acciones administrativas y operaciones sensibles.
+
+---
+
+## 6. CONFIGURACIÓN DE CAPACITOR Y COMUNICACIONES
+
+**Archivo relacionado:** `capacitor.config.ts`
+
+Se observó la opción `cleartext: true`.
+
+**Correcciones solicitadas:**
+
+- Deshabilitar el tráfico HTTP sin cifrado para conexiones remotas en producción.
+- Utilizar HTTPS para la comunicación con el backend.
+- Mantener las excepciones de desarrollo únicamente en entornos locales.
+- Verificar que la aplicación Android no transmita credenciales ni datos comerciales mediante conexiones inseguras.
+
+---
+
+## 7. PRUEBAS Y CONTROL DE CALIDAD
+
+Actualmente no se identificó un script de pruebas automatizadas en `package.json`.
+
+Se solicita incorporar pruebas que cubran como mínimo:
+
+### Seguridad
+- Login con credenciales válidas e inválidas.
+- Intentos de registro como administrador.
+- Acceso a endpoints sin autenticación.
+- Acceso a endpoints con permisos insuficientes.
+- Lectura de configuraciones privadas.
+- Revocación de sesiones.
+- Protección de claves API.
+
+### Funcionamiento
+- Alta, edición y eliminación de productos.
+- Registro de ventas.
+- Compras y gastos.
+- Gestión de clientes.
+- Gestión de usuarios y roles.
+- Configuraciones del sistema.
+- Funcionamiento offline.
+- Recuperación de conexión.
+- Sincronización entre dispositivos.
+- Exportación, importación y restauración de backups.
+
+### Compatibilidad
+- Navegadores de escritorio.
+- Navegadores móviles.
+- Aplicación Android mediante Capacitor.
+- Compilación de producción.
+
+No dar por finalizado el trabajo hasta ejecutar las pruebas disponibles y documentar los resultados.
+
+---
+
+## 8. REQUISITOS QUE NO DEBEN ALTERARSE
+
+Es fundamental preservar:
+
+- El diseño visual actual.
+- Los colores, estilos, componentes y distribución de las pantallas.
+- La navegación existente.
+- Los módulos comerciales.
+- La gestión de productos.
+- Las ventas.
+- Las compras.
+- Los clientes.
+- Los gastos.
+- Los usuarios y roles.
+- Los reportes.
+- Las configuraciones.
+- La funcionalidad offline.
+- La sincronización.
+- La autenticación biométrica.
+- La compatibilidad con Capacitor y Android.
+- Los datos existentes de los usuarios.
+
+No eliminar funcionalidades para resolver vulnerabilidades. Si alguna debe modificarse, reemplazarla por una alternativa segura que conserve su propósito.
+
+---
+
+## 9. METODOLOGÍA DE TRABAJO SOLICITADA A AI STUDIO
+
+Realizar el trabajo por etapas:
+
+**ETAPA 1 — Análisis completo**
+
+- Examinar todos los archivos del proyecto.
+- Identificar dependencias entre frontend, backend y almacenamiento.
+- Detectar vulnerabilidades adicionales a las descritas.
+- Identificar posibles incompatibilidades antes de realizar cambios.
+
+**ETAPA 2 — Correcciones críticas**
+
+Resolver primero:
+- Exposición de claves API.
+- Credenciales predeterminadas.
+- Secreto JWT.
+- Registro público privilegiado.
+- Autorización de endpoints.
+- Acceso a configuraciones sensibles.
+- Autenticación offline insegura.
+
+**ETAPA 3 — Integridad de datos**
+
+Corregir la sincronización, la gestión de conflictos, las eliminaciones y la restauración de backups.
+
+**ETAPA 4 — Pruebas**
+
+Ejecutar pruebas de seguridad, funcionamiento y compilación. Corregir los errores que aparezcan.
+
+**ETAPA 5 — Entrega**
+
+Presentar un resumen de los archivos modificados, vulnerabilidades resueltas, decisiones técnicas y pruebas ejecutadas.
+
+---
+
+## 10. INSTRUCCIÓN FINAL
+
+Quiero que actúes como un ingeniero senior especializado en seguridad de aplicaciones, arquitectura full-stack, React, TypeScript, Node.js, SQLite, IndexedDB y Capacitor.
+
+No te limites a describir los problemas: inspecciona el código real y aplica las correcciones.
+
+Trabaja sobre el proyecto existente y conserva su funcionamiento.
+
+No hagas modificaciones masivas sin comprobar sus consecuencias. Antes de eliminar o sustituir una función, identifica qué módulos dependen de ella y crea una alternativa compatible.
+
+No declares una vulnerabilidad resuelta si solamente ocultaste un botón en la interfaz. La protección debe implementarse en el backend cuando corresponda.
+
+No declares el proyecto seguro sin ejecutar pruebas verificables.
+
+Si necesitas realizar cambios de base de datos, crea migraciones compatibles con los datos existentes y evita la pérdida de información.
+
+Si una corrección puede afectar la funcionalidad offline, biométrica o Android, verifica expresamente esos escenarios.
+
+**Resultado esperado:** una versión 2.1 más segura, estable y confiable, con protección real de datos, autenticación robusta, permisos correctamente aplicados y sincronización consistente, manteniendo la apariencia y las funcionalidades actuales del sistema.

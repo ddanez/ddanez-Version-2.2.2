@@ -1,0 +1,16 @@
+{
+  "name": "D'Danez Gestor Pro",
+  "description": "Sistema integral de gestión de ventas, inventario y cuentas por cobrar/pagar con soporte para escaneo de códigos de barras.",
+  "requestFramePermissions": [
+    "camera",
+    "publickey-credentials-create",
+    "publickey-credentials-get",
+    "web-share",
+    "usb",
+    "bluetooth",
+    "nfc"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

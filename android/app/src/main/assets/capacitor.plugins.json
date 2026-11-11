@@ -1,0 +1,22 @@
+[
+	{
+		"pkg": "@aparajita/capacitor-biometric-auth",
+		"classpath": "com.aparajita.capacitor.biometricauth.BiometricAuthNative"
+	},
+	{
+		"pkg": "@capacitor/app",
+		"classpath": "com.capacitorjs.plugins.app.AppPlugin"
+	},
+	{
+		"pkg": "@capacitor/filesystem",
+		"classpath": "com.capacitorjs.plugins.filesystem.FilesystemPlugin"
+	},
+	{
+		"pkg": "@capacitor/share",
+		"classpath": "com.capacitorjs.plugins.share.SharePlugin"
+	},
+	{
+		"pkg": "@capacitor/text-zoom",
+		"classpath": "com.capacitorjs.plugins.textzoom.TextZoomPlugin"
+	}
+]
